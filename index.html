@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Certificate Generator</title>
+    
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 2rem;
+        }
+        .container {
+            background-color: white;
+            padding: 2rem 3rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+        h1 {
+            color: #1c1e21;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            color: #606770;
+            margin-bottom: 2rem;
+            font-size: 0.9rem;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            padding: 10px;
+            border: 1px solid #dddfe2;
+            border-radius: 6px;
+            font-size: 1rem;
+            resize: vertical;
+            margin-bottom: 1rem;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #1877f2;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #166fe5;
+        }
+        button:disabled {
+            background-color: #a0bdf1;
+            cursor: not-allowed;
+        }
+        .instructions {
+            text-align: left;
+            font-size: 0.85rem;
+            color: #444;
+            background-color: #f9f9f9;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hackathon Certificate Generator 🎓</h1>
+        <p>Enter one or more participant names below (one name per line).</p>
+        
+        <textarea id="names" placeholder="Alice Smith&#10;Bob Johnson&#10;Charlie Brown"></textarea>
+        
+        <button id="generate-btn">Generate Certificates</button>
+
+        <div class="instructions">
+            <strong>How to use:</strong>
+            <ol>
+                <li>Run this file from a local server (e.g., VS Code "Live Server").</li>
+                <li>Make sure your certificate template is named <code>certificate-template.jpg</code> and is in the same folder.</li>
+                <li>Enter names in the box above, with each name on a new line.</li>
+                <li>Click the "Generate Certificates" button.</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Get references to the HTML elements
+        const namesTextarea = document.getElementById('names');
+        const generateBtn = document.getElementById('generate-btn');
+        
+        // Main function to create a PDF certificate for a single name
+        const createPdf = async (name) => {
+            try {
+                // 1. Load the certificate template image
+                const templateImageUrl = './certificate-template.jpg';
+                const imageBytes = await fetch(templateImageUrl).then(res => res.arrayBuffer());
+
+                // 2. Create a new PDF document
+                const pdfDoc = await PDFLib.PDFDocument.create();
+
+                // 3. Embed the image into the PDF
+                const certificateImage = await pdfDoc.embedJpg(imageBytes);
+                const imageDims = certificateImage.scale(1);
+
+                // 4. Add a page with the same dimensions as the image
+                const page = pdfDoc.addPage([imageDims.width, imageDims.height]);
+
+                // 5. Draw the certificate image on the page
+                page.drawImage(certificateImage, {
+                    x: 0,
+                    y: 0,
+                    width: imageDims.width,
+                    height: imageDims.height,
+                });
+
+                // 6. Draw the participant's name on the certificate
+                // --- ✏️ YOU CAN EDIT THESE VALUES ---
+                // --- ✏️ YOU CAN EDIT THESE VALUES ---
+const x_coordinate = 1025;      // **FIXED:** Nudges the name slightly right for perfect visual centering.
+const y_coordinate = 875;      // This value moves the name up into the blank space.
+let fontSize = 50;             // This is the STARTING/MAXIMUM font size.
+const maxWidth = 1200;         // The maximum allowed width for the name.
+const minFontSize = 20;        // The smallest the font can get.
+// --- ---------------------------- ---
+                // --- ---------------------------- ---
+
+                // Load the font
+                const font = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+                
+                // --- Dynamic Font Sizing Logic ---
+                let textWidth = font.widthOfTextAtSize(name, fontSize);
+
+                // Keep shrinking the font size until the text fits within maxWidth
+                while (textWidth > maxWidth && fontSize > minFontSize) {
+                    fontSize--; // Decrease font size by 1
+                    textWidth = font.widthOfTextAtSize(name, fontSize); // Recalculate width
+                }
+                
+                page.drawText(name, {
+                    x: x_coordinate - (textWidth / 2), // This centers the text on the X coordinate
+                    y: y_coordinate,
+                    font: font,
+                    size: fontSize, // Use the new, dynamically calculated font size
+                    color: PDFLib.rgb(0.1, 0.1, 0.1), // Dark grey color
+                });
+
+
+                // 7. Save the PDF to bytes
+                const pdfBytes = await pdfDoc.save();
+
+                // 8. Create a blob and trigger a download
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `Certificate - ${name}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+            } catch (error) {
+                console.error(`Failed to generate certificate for ${name}:`, error);
+                alert(`Could not generate certificate for ${name}. Make sure the 'certificate-template.jpg' file is in the same folder and the name is correct.`);
+            }
+        };
+
+        // Add a click event listener to the generate button
+        generateBtn.addEventListener('click', async () => {
+            const namesInput = namesTextarea.value.trim();
+            if (!namesInput) {
+                alert('Please enter at least one name.');
+                return;
+            }
+
+            // Disable button to prevent multiple clicks
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating...';
+
+            // Split names by new line and filter out empty lines
+            const names = namesInput.split('\n').map(name => name.trim()).filter(name => name);
+            
+            // Generate a certificate for each name
+            for (const name of names) {
+                await createPdf(name);
+                // Optional: Add a small delay between downloads to prevent browser issues
+                await new Promise(resolve => setTimeout(resolve, 300)); 
+            }
+
+            // Re-enable the button
+            generateBtn.disabled = false;
+            generateBtn.textContent = 'Generate Certificates';
+        });
+
+    </script>
+</body>
+</html>
