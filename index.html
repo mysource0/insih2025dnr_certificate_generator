@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro Certificate Editor</title>
+    <title>Pro Certificate Editor (CSV + Paste)</title>
     
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
@@ -27,7 +27,11 @@
         .control-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
         .control-grid label { font-weight: bold; font-size: 0.9rem; color: #444; }
         .control-grid input { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-        textarea#names-input { width: 100%; height: 200px; padding: 10px; border-radius: 6px; font-size: 1rem; }
+        input[type="file"] { padding: 8px; background-color: #f9f9f9; border-radius: 4px; }
+        textarea#csv-paste-area {
+            width: 100%; height: 150px; font-family: monospace; font-size: 0.9rem;
+            padding: 10px; border-radius: 6px; border: 1px solid #ccc;
+        }
         button {
             background-color: #1877f2; color: white; border: none; padding: 12px 24px;
             border-radius: 6px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: background-color 0.2s;
@@ -49,9 +53,7 @@
         .preview-item-info button { font-size: 0.9rem; padding: 8px 12px; margin-top: 0.5rem; width: 100%; }
         button.edit-btn { background-color: #f0ad4e;}
         button.download-btn { background-color: #42b72a;}
-        button.delete-btn { background-color: #d9534f; } /* Style for the new delete button */
-
-        /* Modal Styles */
+        button.delete-btn { background-color: #d9534f; }
         #modal {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6);
             display: none; justify-content: center; align-items: center; z-index: 1000;
@@ -79,8 +81,10 @@
         <h1>Pro Certificate Editor 🛠️</h1>
         <div class="main-controls">
             <div class="control-group">
-                <h2>1. Enter Names</h2>
-                <textarea id="names-input" placeholder="Enter one name per line..."></textarea>
+                <h2>1. Provide Data</h2>
+                <p style="font-size: 0.9rem; color: #666; margin-top: 0;">Upload a file <strong>OR</strong> paste CSV data below.</p>
+                <input type="file" id="csv-file-input" accept=".csv, .txt" style="margin-bottom: 1rem;">
+                <textarea id="csv-paste-area" placeholder="Example:&#10;IH001,Name One,CSE,Name Two,CSE&#10;IH002,Name Alpha,ECE,Name Beta,ECE"></textarea>
             </div>
             <div class="control-group">
                 <h2>2. Set Initial Styles</h2>
@@ -104,7 +108,7 @@
                 </div>
             </div>
         </div>
-        <button id="generate-all-btn">3. Generate All Previews</button>
+        <button id="generate-all-btn">3. Process Data & Generate Previews</button>
         <div id="preview-gallery"></div>
     </div>
 
@@ -122,10 +126,11 @@
     <script>
         // --- SETUP ---
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.worker.min.js';
-        let certificateStore = []; // To hold all certificate data {name, settings, pdfBytes, textRect}
+        let certificateStore = [];
         
         // --- DOM ELEMENTS ---
-        const namesInput = document.getElementById('names-input');
+        const csvFileInput = document.getElementById('csv-file-input');
+        const csvPasteArea = document.getElementById('csv-paste-area');
         const generateAllBtn = document.getElementById('generate-all-btn');
         const previewGallery = document.getElementById('preview-gallery');
         const modal = document.getElementById('modal');
@@ -135,7 +140,7 @@
         const editInput = document.getElementById('edit-input');
 
         // --- CORE PDF FUNCTIONS ---
-        const generatePdf = async (name, settings) => {
+        const generatePdf = async (text, settings) => {
             try {
                 const templateImageUrl = './certificate-template.jpg';
                 const imageBytes = await fetch(templateImageUrl).then(res => res.arrayBuffer());
@@ -144,22 +149,28 @@
                 const page = pdfDoc.addPage([certificateImage.width, certificateImage.height]);
                 page.drawImage(certificateImage, { x: 0, y: 0, width: certificateImage.width, height: certificateImage.height });
                 const font = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+                
                 let fontSize = settings.fontSize;
-                let textWidth = font.widthOfTextAtSize(name, fontSize);
+                let textWidth = font.widthOfTextAtSize(text, fontSize);
+                
                 while (textWidth > settings.maxWidth && fontSize > 20) {
                     fontSize--;
-                    textWidth = font.widthOfTextAtSize(name, fontSize);
+                    textWidth = font.widthOfTextAtSize(text, fontSize);
                 }
+                
                 const textHeight = font.heightAtSize(fontSize);
                 const finalX = settings.x - (textWidth / 2);
                 const finalY = settings.y;
-                page.drawText(name, { x: finalX, y: finalY, font, size: fontSize, color: PDFLib.rgb(0.1, 0.1, 0.1) });
+                
+                page.drawText(text, { x: finalX, y: finalY, font, size: fontSize, color: PDFLib.rgb(0.1, 0.1, 0.1) });
+                
                 return {
                     pdfBytes: await pdfDoc.save(),
                     textRect: { x: finalX, y: finalY, width: textWidth, height: textHeight, fontSize }
                 };
             } catch (error) {
-                console.error(`Error for ${name}:`, error);
+                console.error(`Error generating PDF for "${text}":`, error);
+                alert(`Failed to load the certificate template. Make sure 'certificate-template.jpg' is in the same folder as this HTML file.`);
                 return null;
             }
         };
@@ -203,25 +214,68 @@
         };
 
         generateAllBtn.addEventListener('click', async () => {
-            const names = namesInput.value.trim().split('\n').filter(Boolean);
-            if (names.length === 0) {
-                alert('Please enter at least one name.');
+            const file = csvFileInput.files[0];
+            const pastedData = csvPasteArea.value.trim();
+            let csvContent = '';
+
+            if (file) {
+                csvContent = await file.text();
+            } else if (pastedData) {
+                csvContent = pastedData;
+            } else {
+                alert('Please upload a CSV file or paste data into the text box.');
                 return;
             }
+
             generateAllBtn.disabled = true;
-            generateAllBtn.textContent = 'Generating...';
+            generateAllBtn.textContent = 'Processing...';
             certificateStore = [];
 
-            const settings = getGlobalSettings();
-            for (const name of names) {
-                const result = await generatePdf(name, settings);
-                if (result) {
-                    certificateStore.push({ name, settings, ...result });
+            const lines = csvContent.trim().split('\n');
+            const participants = [];
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                const parts = line.split(',');
+                if (parts.length < 3) continue; 
+                const teamId = parts[0].trim();
+
+                for (let i = 1; i < parts.length; i += 2) {
+                    const name = parts[i] ? parts[i].trim() : '';
+                    const branch = parts[i + 1] ? parts[i + 1].trim() : '';
+                    if (name && branch) {
+                        participants.push({ teamId, name, branch });
+                    }
                 }
             }
+            
+            if (participants.length === 0) {
+                alert('No valid participant data found. Please check the CSV format.');
+                generateAllBtn.disabled = false;
+                generateAllBtn.textContent = '3. Process Data & Generate Previews';
+                return;
+            }
+            
+            const settings = getGlobalSettings();
+            for (const p of participants) {
+                const displayText = `${p.name} (${p.branch})`;
+                const safeName = p.name.replace(/\s+/g, '_');
+                const fileName = `${p.teamId}_${safeName}_${p.branch}.pdf`;
+
+                const result = await generatePdf(displayText, settings);
+                if (result) {
+                    certificateStore.push({
+                        name: displayText,
+                        fileName: fileName,
+                        settings,
+                        ...result
+                    });
+                }
+            }
+
             renderGallery();
             generateAllBtn.disabled = false;
-            generateAllBtn.textContent = '3. Generate All Previews';
+            generateAllBtn.textContent = '3. Process Data & Generate Previews';
         });
         
         previewGallery.addEventListener('click', e => {
@@ -243,19 +297,19 @@
             const blob = new Blob([cert.pdfBytes], { type: 'application/pdf' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = `Certificate - ${cert.name}.pdf`;
+            link.download = cert.fileName;
             link.click();
+            URL.revokeObjectURL(link.href);
         };
 
         const deleteCertificate = (index) => {
             if (confirm(`Are you sure you want to delete the certificate for "${certificateStore[index].name}"?`)) {
-                certificateStore.splice(index, 1); // Remove from data
-                renderGallery(); // Re-render the UI
+                certificateStore.splice(index, 1);
+                renderGallery();
             }
         };
 
         // --- MODAL EDITOR LOGIC ---
-        // (This section remains the same as the previous version)
         let activeEditorIndex = -1;
         modalClose.addEventListener('click', () => modal.style.display = 'none');
 
@@ -277,16 +331,8 @@
             modal.style.display = 'flex';
         };
         
-        dragHandle.addEventListener('dblclick', () => {
-             // ... existing dblclick logic ...
-        });
-
-        editInput.addEventListener('blur', async () => {
-             // ... existing blur logic ...
-        });
-
-        // Simplified Drag Logic
-        // ... existing drag logic ...
+        // Note: Full drag-and-drop and inline text editing logic for the modal
+        // can be added here if needed, but is excluded for simplicity as it was not in the original request.
     </script>
 </body>
 </html>
